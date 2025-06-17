@@ -2,187 +2,130 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>mask 😷</title>
+  <title>Detector de Mascarilla desde Imagen</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.5.0"></script>
   <style>
     body { font-family: sans-serif; text-align: center; padding: 20px; }
-    #container { display: flex; flex-direction: column; align-items: center; }
-    video, canvas { border: 2px solid #333; border-radius: 8px; margin: 10px; }
-    #resultado { 
-      font-size: 1.5rem; 
-      font-weight: bold; 
+    img, canvas { max-width: 300px; margin: 10px; border: 2px solid #333; border-radius: 8px; }
+    #resultado {
+      font-size: 1.5rem;
+      font-weight: bold;
       padding: 15px;
       border-radius: 8px;
       margin-top: 20px;
-      background-color: #f0f0f0;
       min-width: 300px;
     }
-    .humano { color: #0066cc; background-color: #e6f2ff; }
-    .flor { color: #009933; background-color: #e6ffe6; }
-    button { 
-      font-size: 1rem; 
-      padding: 10px 20px; 
-      background-color: #4CAF50;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
+    .con-mascarilla { color: #009933; background-color: #e6ffe6; }
+    .sin-mascarilla { color: #cc0000; background-color: #ffe6e6; }
+    input[type="file"] {
+      margin-top: 20px;
     }
-    #debug { 
-      margin-top: 20px; 
-      font-family: monospace; 
-      text-align: left;
+    #debug {
+      margin-top: 20px;
+      font-family: monospace;
       background-color: #f8f8f8;
       padding: 10px;
       border-radius: 4px;
       max-width: 600px;
+      margin-left: auto;
+      margin-right: auto;
+      text-align: left;
     }
   </style>
 </head>
 <body>
-  <div id="container">
-    <h1>Detector de si una persona utiliza mascarilla o no 😷</h1>
-    <video id="video" width="300" height="225" autoplay muted></video>
-    <button onclick="cambiarCamara()">🔁 Cambiar Cámara</button>
-    
-    <canvas id="canvas" width="300" height="225"></canvas>
-    
-    <div id="resultado">Esperando predicción...</div>
-    <div id="debug"></div>
-  </div>
+  <h1>Detector de uso de mascarilla 😷</h1>
+
+  <input type="file" accept="image/*" onchange="procesarImagen(event)">
+  <br>
+  <img id="imagen" alt="Imagen cargada" />
+  <canvas id="canvas" width="100" height="100" style="display: none;"></canvas>
+  <div id="resultado">Esperando imagen...</div>
+  <div id="debug"></div>
 
   <script>
     const modelo = {
       instancia: null,
       cargado: false,
-      inputShape: [1, 100, 100, 1]
     };
-    
+
     const elementos = {
-      video: document.getElementById('video'),
+      imagen: document.getElementById('imagen'),
       canvas: document.getElementById('canvas'),
       resultado: document.getElementById('resultado'),
-      debug: document.getElementById('debug')
+      debug: document.getElementById('debug'),
     };
-    
-    let camara = {
-      stream: null,
-      facingMode: "user",
-      activa: false
-    };
-    
-    async function iniciarAplicacion() {
-      await cargarModelo();
-      await iniciarCamara();
-      comenzarPredicciones();
-    }
-    
+
     async function cargarModelo() {
       try {
         elementos.debug.innerHTML += '⏳ Cargando modelo...<br>';
         modelo.instancia = await tf.loadGraphModel("model.json");
         modelo.cargado = true;
         elementos.debug.innerHTML += '✅ Modelo cargado correctamente<br>';
-        elementos.resultado.textContent = 'Modelo listo. Iniciando cámara...';
       } catch (error) {
         elementos.resultado.textContent = '❌ Error cargando el modelo';
-        elementos.debug.innerHTML += `❌ Error al cargar modelo: ${error.message}<br>`;
-        console.error("Error al cargar modelo:", error);
+        elementos.debug.innerHTML += `❌ Error: ${error.message}<br>`;
+        console.error(error);
       }
     }
-    
-    async function iniciarCamara() {
-      if (camara.stream) {
-        detenerCamara();
-      }
-      
-      const constraints = {
-        video: { width: 300, height: 225, facingMode: camara.facingMode },
-        audio: false
+
+    async function procesarImagen(evento) {
+      const archivo = evento.target.files[0];
+      if (!archivo) return;
+
+      const lector = new FileReader();
+      lector.onload = async function(e) {
+        elementos.imagen.src = e.target.result;
+        elementos.imagen.onload = async () => {
+          await predecir();
+        };
       };
-      
-      try {
-        camara.stream = await navigator.mediaDevices.getUserMedia(constraints);
-        elementos.video.srcObject = camara.stream;
-        camara.activa = true;
-        elementos.debug.innerHTML += '📷 Cámara iniciada correctamente<br>';
-      } catch (error) {
-        elementos.resultado.textContent = '❌ Error al acceder a la cámara';
-        elementos.debug.innerHTML += `❌ Error de cámara: ${error.message}<br>`;
-        console.error("Error al acceder a cámara:", error);
-      }
+      lector.readAsDataURL(archivo);
     }
-    
-    function detenerCamara() {
-      if (camara.stream) {
-        camara.stream.getTracks().forEach(track => track.stop());
-        camara.activa = false;
-      }
-    }
-    
-    function cambiarCamara() {
-      camara.facingMode = camara.facingMode === "user" ? "environment" : "user";
-      elementos.debug.innerHTML += `🔄 Cambiando a cámara ${camara.facingMode}<br>`;
-      iniciarCamara();
-    }
-    
-    function comenzarPredicciones() {
-      if (!modelo.cargado || !camara.activa) {
-        setTimeout(comenzarPredicciones, 500);
+
+    async function predecir() {
+      if (!modelo.cargado) {
+        elementos.resultado.textContent = "❌ Modelo no cargado.";
         return;
       }
-      predecirFrame();
-    }
-    
-    async function predecirFrame() {
-      if (!modelo.cargado || !camara.activa) return;
-      
+
       const ctx = elementos.canvas.getContext('2d');
-      ctx.drawImage(elementos.video, 0, 0, elementos.canvas.width, elementos.canvas.height);
-      
-      // Canvas oculto para redimensionar
-      const canvasTemp = document.createElement('canvas');
-      canvasTemp.width = 100;
-      canvasTemp.height = 100;
-      const ctxTemp = canvasTemp.getContext('2d');
-      ctxTemp.drawImage(elementos.video, 0, 0, 100, 100);
-      
-      let tensor;
+      ctx.drawImage(elementos.imagen, 0, 0, 100, 100);
+
       try {
-        tensor = tf.tidy(() => {
-          return tf.browser.fromPixels(canvasTemp)
-            .mean(2)
+        const tensor = tf.tidy(() => {
+          return tf.browser.fromPixels(elementos.canvas)
+            .mean(2) // escala de grises
             .toFloat()
             .div(255.0)
             .expandDims(0)
             .expandDims(-1);
         });
-        
-        const prediccion = await modelo.instancia.predict(tensor).data();
-        const resultado = prediccion[0];
-        const esHumano = resultado >= 0.5;
 
-        actualizarUI(esHumano);
+        const prediccion = await modelo.instancia.predict(tensor).data();
+        const valor = prediccion[0];
+        console.log("Predicción:", valor);
+
+        // CAMBIO: Ahora interpretamos que 1 = CON mascarilla, 0 = SIN mascarilla
+        const tieneMascarilla = valor >= 0.5;
+
+        if (tieneMascarilla) {
+          elementos.resultado.innerHTML = `😷 CON mascarilla`;
+          elementos.resultado.className = "con-mascarilla";
+        } else {
+          elementos.resultado.innerHTML = `🧍 SIN mascarilla`;
+          elementos.resultado.className = "sin-mascarilla";
+        }
+
         tensor.dispose();
       } catch (error) {
-        elementos.debug.innerHTML += `❌ Error en predicción: ${error.message}<br>`;
-        console.error("Error en predicción:", error);
-      }
-      
-      setTimeout(predecirFrame, 500);
-    }
-    
-    function actualizarUI(esHumano) {
-      if (esHumano) {
-        elementos.resultado.innerHTML = `🧍 sin mascarilla`;
-        elementos.resultado.className = "sin mascararilla";
-      } else {
-        elementos.resultado.innerHTML = `😷 mascarilla`;
-        elementos.resultado.className = "mascarilla";
+        elementos.resultado.textContent = "❌ Error en la predicción.";
+        elementos.debug.innerHTML += `❌ Predicción fallida: ${error.message}<br>`;
+        console.error(error);
       }
     }
-    
-    window.addEventListener('load', iniciarAplicacion);
+
+    window.addEventListener('load', cargarModelo);
   </script>
 </body>
 </html>
